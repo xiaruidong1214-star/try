@@ -43,12 +43,15 @@ def analyze_code_task(self, code: str, language: str = "python", cache_key: str 
             "llm_suggestions": llm_result.get("suggestions", []),
             "details": analysis_result.get("details", []),
             "language": language,
-            "code_preview": code[:200] + "..." if len(code) > 200 else code,
+            "code_preview": code,  # 返回完整代码，让前端渲染
         }
         
         # ★ 5. 写入缓存
         if cache_key:
             cache_service.set(cache_key, result, ttl=3600)
+        # ★ 6. 保存到数据库
+        from app.models.database import save_review
+        save_review(task_id, code, language, result)
         
         logger.info(f"[Celery] Task {task_id} completed, complexity={result['complexity']}")
         return result

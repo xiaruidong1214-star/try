@@ -16,10 +16,27 @@
 <body class="bg-slate-900 text-slate-100 min-h-screen">
     <div class="max-w-5xl mx-auto p-6">
         <!-- 标题 -->
-        <header class="mb-8">
-            <h1 class="text-4xl font-bold text-cyan-400">🤖 AI Code Review</h1>
-            <p class="text-slate-400 mt-2">粘贴代码，AI 自动分析复杂度并给出优化建议</p>
-        </header>
+        <header class="mb-8 flex justify-between items-start">
+    <div>
+        <h1 class="text-4xl font-bold text-cyan-400">🤖 AI Code Review</h1>
+        <p class="text-slate-400 mt-2">粘贴代码，AI 自动分析复杂度并给出优化建议</p>
+    </div>
+    <button onclick="showHistory()" 
+        class="bg-slate-700 hover:bg-slate-600 text-white px-4 py-2 rounded transition">
+        📚 历史记录
+    </button>
+</header>
+
+<!-- 历史记录弹窗 -->
+<div id="historyModal" class="hidden fixed inset-0 bg-black/70 z-50 flex items-center justify-center p-4">
+    <div class="bg-slate-800 rounded-lg max-w-3xl w-full max-h-[80vh] overflow-y-auto p-6">
+        <div class="flex justify-between items-center mb-4">
+            <h2 class="text-2xl font-bold text-cyan-400">📚 历史记录</h2>
+            <button onclick="closeHistory()" class="text-slate-400 hover:text-white text-2xl">×</button>
+        </div>
+        <div id="historyList" class="space-y-2"></div>
+    </div>
+</div>
 
         <!-- 输入区 -->
         <div class="bg-slate-800 rounded-lg p-6 mb-6 shadow-lg">
@@ -91,10 +108,9 @@
 
             <!-- 代码预览 -->
             <div class="bg-slate-800 rounded-lg p-6">
-                <h2 class="text-xl font-bold text-cyan-400 mb-3">📝 代码预览</h2>
-                <pre class="bg-slate-900 rounded p-3 overflow-x-auto"><code id="codePreview" class="language-python text-sm"></code></pre>
+                 <h2 class="text-xl font-bold text-cyan-400 mb-3">📝 代码分析（行内标注）</h2>
+                 <div id="codeWithAnnotations" class="bg-slate-900 rounded p-3 overflow-x-auto font-mono text-sm"></div>
             </div>
-        </div>
 
         <!-- 错误提示 -->
         <div id="errorSection" class="hidden bg-red-900 border border-red-700 rounded-lg p-4 mt-4">
@@ -200,9 +216,8 @@
             });
 
             // 代码预览
-            const codeEl = document.getElementById("codePreview");
-            codeEl.textContent = result.code_preview || "";
-            hljs.highlightElement(codeEl);
+            // 代码预览（带行内标注）
+            renderCodeWithAnnotations(result.code_preview || "", result.details || []);
         }
 
         function showError(msg) {
@@ -210,6 +225,120 @@
             el.classList.remove("hidden");
             document.getElementById("errorText").textContent = "❌ " + msg;
         }
+    
+    function renderCodeWithAnnotations(code, details) {
+    const container = document.getElementById("codeWithAnnotations");
+    container.innerHTML = "";
+
+    // 建立行号 -> 标注列表 的映射
+    const lineAnnotations = {};
+    details.forEach(d => {
+        if (d.line) {
+            if (!lineAnnotations[d.line]) lineAnnotations[d.line] = [];
+            lineAnnotations[d.line].push(d);
+        }
+    });
+
+    // 按行渲染
+    const lines = code.split("\n");
+    lines.forEach((line, idx) => {
+        const lineNum = idx + 1;
+        const annotations = lineAnnotations[lineNum] || [];
+
+        const lineDiv = document.createElement("div");
+        lineDiv.className = "flex items-start py-0.5 hover:bg-slate-800/50";
+
+        // 行号
+        const lineNumSpan = document.createElement("span");
+        lineNumSpan.className = "text-slate-600 select-none mr-3 w-8 text-right";
+        lineNumSpan.textContent = lineNum;
+        lineDiv.appendChild(lineNumSpan);
+
+        // 代码内容
+        const codeSpan = document.createElement("span");
+        codeSpan.className = "flex-1 whitespace-pre text-cyan-100";
+        codeSpan.textContent = line || " ";
+
+        // 如果有标注，高亮背景
+        if (annotations.length > 0) {
+            const hasWarning = annotations.some(a => a.type === "loop" && a.depth >= 2);
+            codeSpan.className += hasWarning
+                ? " bg-red-900/30 border-l-2 border-red-500 pl-2"
+                : " bg-yellow-900/20 border-l-2 border-yellow-500 pl-2";
+        }
+
+        lineDiv.appendChild(codeSpan);
+
+        // 标注文字
+        if (annotations.length > 0) {
+            const annoSpan = document.createElement("span");
+            annoSpan.className = "ml-4 text-xs";
+            const annoText = annotations.map(a => {
+                if (a.type === "loop") return `⚠️ ${a.loop_type} 循环 (深度 ${a.depth})`;
+                if (a.type === "recursion") return `🔁 递归调用`;
+                return a.message || "";
+            }).join(" | ");
+            annoSpan.textContent = annoText;
+            annoSpan.className += annotations.some(a => a.depth >= 2)
+                ? " text-red-400"
+                : " text-yellow-400";
+            lineDiv.appendChild(annoSpan);
+        }
+
+        container.appendChild(lineDiv);
+    });
+}
+    async function showHistory() {
+    document.getElementById("historyModal").classList.remove("hidden");
+    const list = document.getElementById("historyList");
+    list.innerHTML = '<p class="text-slate-400">加载中...</p>';
+
+    try {
+        const res = await fetch(`${API_BASE}/history?limit=20`);
+        const data = await res.json();
+
+        if (!data.items || data.items.length === 0) {
+            list.innerHTML = '<p class="text-slate-400">暂无历史记录</p>';
+            return;
+        }
+
+        list.innerHTML = "";
+        data.items.forEach(item => {
+            const div = document.createElement("div");
+            div.className = "bg-slate-900 rounded p-3 hover:bg-slate-700 cursor-pointer transition";
+            div.onclick = () => loadHistoryItem(item.task_id);
+            div.innerHTML = `
+                <div class="flex justify-between items-center mb-1">
+                    <span class="text-cyan-400 font-bold">${item.complexity || "?"}</span>
+                    <span class="text-slate-500 text-xs">${item.created_at}</span>
+                </div>
+                <div class="text-xs text-slate-400 font-mono truncate">${item.code_preview}</div>
+            `;
+            list.appendChild(div);
+        });
+    } catch (e) {
+        list.innerHTML = `<p class="text-red-400">加载失败: ${e.message}</p>`;
+    }
+}
+
+function closeHistory() {
+    document.getElementById("historyModal").classList.add("hidden");
+}
+
+async function loadHistoryItem(taskId) {
+    try {
+        const res = await fetch(`${API_BASE}/history/${taskId}`);
+        const data = await res.json();
+        closeHistory();
+        
+        // 隐藏旧结果，展示历史结果
+        document.getElementById("progressSection").classList.add("hidden");
+        document.getElementById("errorSection").classList.add("hidden");
+        showResult(data.result);
+    } catch (e) {
+        showError("加载详情失败: " + e.message);
+    }
+}
     </script>
 </body>
 </html>

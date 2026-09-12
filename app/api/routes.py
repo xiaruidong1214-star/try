@@ -80,3 +80,25 @@ async def submit_review_stream(request: Request):
         source_type="code_stream"
     )
 
+from app.models.database import get_history, get_review_detail, get_stats
+
+
+@router.get("/history")
+async def history(limit: int = 20, offset: int = 0):
+    """获取历史记录列表"""
+    return {"items": get_history(limit, offset)}
+
+
+@router.get("/history/{task_id}")
+async def history_detail(task_id: str):
+    """获取单条记录详情"""
+    detail = get_review_detail(task_id)
+    if not detail:
+        raise HTTPException(status_code=404, detail="Record not found")
+    return detail
+
+
+@router.get("/stats")
+async def stats():
+    """获取统计信息"""
+    return get_stats()

@@ -14,7 +14,8 @@ logging.basicConfig(
 )
 
 logger = logging.getLogger(__name__)
-
+from app.models.database import init_db
+init_db()
 app = FastAPI(
     title=settings.APP_NAME,
     version=settings.APP_VERSION,
