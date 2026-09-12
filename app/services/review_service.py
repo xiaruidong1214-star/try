@@ -3,8 +3,10 @@ import logging
 from typing import Dict, Any, Optional
 from app.core.celery_app import celery_app
 from app.tasks.review_tasks import analyze_code_task
+from app.services.cache_service import cache_service
 
 logger = logging.getLogger(__name__)
+
 
 class ReviewService:
     
@@ -12,10 +14,22 @@ class ReviewService:
     def submit_task(code: Optional[str], github_url: Optional[str], language: str) -> tuple:
         task_id = str(uuid.uuid4())
         source_type = "code" if code else "github"
-        code_content = code or "从 GitHub 获取的代码（待实现）"
+        code_content = code or "# GitHub 代码获取待实现"
         
+        # ★ 1. 先查缓存
+        cache_key = cache_service.make_cache_key(code_content, language)
+        cached = cache_service.get(cache_key)
+        
+        if cached:
+            # 缓存命中：直接把结果存到 Celery 结果后端，用户查 task_id 就能拿到
+            logger.info(f"Cache hit for task {task_id}, skipping Celery")
+            from app.core.celery_app import celery_app
+            celery_app.backend.store_result(task_id, cached, state="SUCCESS")
+            return task_id, source_type
+        
+        # ★ 2. 缓存未命中：提交 Celery 任务
         analyze_code_task.apply_async(
-            args=[code_content, language],
+            args=[code_content, language, cache_key],   # 把 cache_key 传给任务
             task_id=task_id
         )
         

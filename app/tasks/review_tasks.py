@@ -3,12 +3,13 @@ from typing import Dict, Any, List
 from app.core.celery_app import celery_app
 from app.services.ast_analyzer import ComplexityAnalyzer
 from app.services.llm_service import generate_review
+from app.services.cache_service import cache_service
 
 logger = logging.getLogger(__name__)
 
 
 @celery_app.task(bind=True, name="analyze_code")
-def analyze_code_task(self, code: str, language: str = "python"):
+def analyze_code_task(self, code: str, language: str = "python", cache_key: str = None):
     task_id = self.request.id
     logger.info(f"[Celery] Starting analysis for task {task_id}")
     
@@ -20,7 +21,7 @@ def analyze_code_task(self, code: str, language: str = "python"):
         analyzer = ComplexityAnalyzer()
         analysis_result = analyzer.analyze(code)
         
-        # 2. 规则建议（保底）
+        # 2. 规则建议
         self.update_state(state="PROGRESS", meta={"progress": 50, "step": "生成基础建议..."})
         rule_suggestions = _generate_suggestions(analysis_result)
         
@@ -29,7 +30,6 @@ def analyze_code_task(self, code: str, language: str = "python"):
         llm_result = generate_review(code, analysis_result)
         
         # 4. 组装结果
-        self.update_state(state="PROGRESS", meta={"progress": 90, "step": "整理分析结果..."})
         result = {
             "complexity": analysis_result.get("complexity", "UNKNOWN"),
             "max_loop_depth": analysis_result.get("max_loop_depth", 0),
@@ -45,6 +45,10 @@ def analyze_code_task(self, code: str, language: str = "python"):
             "language": language,
             "code_preview": code[:200] + "..." if len(code) > 200 else code,
         }
+        
+        # ★ 5. 写入缓存
+        if cache_key:
+            cache_service.set(cache_key, result, ttl=3600)
         
         logger.info(f"[Celery] Task {task_id} completed, complexity={result['complexity']}")
         return result
