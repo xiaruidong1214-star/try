@@ -1,0 +1,344 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI 代码审查 - Code Review Bot</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <style>
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+        .spinner { animation: spin 1s linear infinite; }
+        @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+    </style>
+</head>
+<body class="bg-slate-900 text-slate-100 min-h-screen">
+    <div class="max-w-5xl mx-auto p-6">
+        <!-- 标题 -->
+        <header class="mb-8 flex justify-between items-start">
+    <div>
+        <h1 class="text-4xl font-bold text-cyan-400">🤖 AI Code Review</h1>
+        <p class="text-slate-400 mt-2">粘贴代码，AI 自动分析复杂度并给出优化建议</p>
+    </div>
+    <button onclick="showHistory()" 
+        class="bg-slate-700 hover:bg-slate-600 text-white px-4 py-2 rounded transition">
+        📚 历史记录
+    </button>
+</header>
+
+<!-- 历史记录弹窗 -->
+<div id="historyModal" class="hidden fixed inset-0 bg-black/70 z-50 flex items-center justify-center p-4">
+    <div class="bg-slate-800 rounded-lg max-w-3xl w-full max-h-[80vh] overflow-y-auto p-6">
+        <div class="flex justify-between items-center mb-4">
+            <h2 class="text-2xl font-bold text-cyan-400">📚 历史记录</h2>
+            <button onclick="closeHistory()" class="text-slate-400 hover:text-white text-2xl">×</button>
+        </div>
+        <div id="historyList" class="space-y-2"></div>
+    </div>
+</div>
+
+        <!-- 输入区 -->
+        <div class="bg-slate-800 rounded-lg p-6 mb-6 shadow-lg">
+            <label class="block text-sm font-medium mb-2">代码语言</label>
+            <select id="language" class="bg-slate-700 rounded px-3 py-2 mb-4 text-white">
+                <option value="python">Python</option>
+                <option value="javascript">JavaScript</option>
+                <option value="java">Java</option>
+            </select>
+
+            <label class="block text-sm font-medium mb-2">粘贴代码</label>
+            <textarea id="codeInput" rows="12"
+                class="w-full bg-slate-900 border border-slate-700 rounded p-3 font-mono text-sm text-cyan-100 focus:outline-none focus:border-cyan-400"
+                placeholder="def two_sum(nums, target):&#10;    for i in range(len(nums)):&#10;        for j in range(i+1, len(nums)):&#10;            if nums[i] + nums[j] == target:&#10;                return [i, j]"></textarea>
+
+            <button id="submitBtn" onclick="submitCode()"
+                class="mt-4 bg-cyan-500 hover:bg-cyan-600 text-white font-semibold px-6 py-2 rounded transition">
+                🚀 提交分析
+            </button>
+        </div>
+
+        <!-- 进度区 -->
+        <div id="progressSection" class="hidden bg-slate-800 rounded-lg p-6 mb-6">
+            <div class="flex items-center gap-3">
+                <div class="spinner w-5 h-5 border-2 border-cyan-400 border-t-transparent rounded-full"></div>
+                <span id="progressText" class="text-slate-300">正在分析...</span>
+            </div>
+            <div class="mt-3 bg-slate-700 rounded-full h-2">
+                <div id="progressBar" class="bg-cyan-400 h-2 rounded-full transition-all" style="width: 0%"></div>
+            </div>
+        </div>
+
+        <!-- 结果区 -->
+        <div id="resultSection" class="hidden space-y-4">
+            <!-- 复杂度卡片 -->
+            <div class="bg-slate-800 rounded-lg p-6">
+                <h2 class="text-xl font-bold text-cyan-400 mb-4">📊 复杂度分析</h2>
+                <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
+                    <div class="bg-slate-900 rounded p-3">
+                        <div class="text-xs text-slate-400">时间复杂度</div>
+                        <div id="complexity" class="text-2xl font-bold text-yellow-400">-</div>
+                    </div>
+                    <div class="bg-slate-900 rounded p-3">
+                        <div class="text-xs text-slate-400">循环嵌套深度</div>
+                        <div id="loopDepth" class="text-2xl font-bold text-cyan-400">-</div>
+                    </div>
+                    <div class="bg-slate-900 rounded p-3">
+                        <div class="text-xs text-slate-400">循环数量</div>
+                        <div id="loopCount" class="text-2xl font-bold text-cyan-400">-</div>
+                    </div>
+                    <div class="bg-slate-900 rounded p-3">
+                        <div class="text-xs text-slate-400">是否递归</div>
+                        <div id="hasRecursion" class="text-2xl font-bold text-cyan-400">-</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- LLM 总结 -->
+            <div class="bg-slate-800 rounded-lg p-6">
+                <h2 class="text-xl font-bold text-cyan-400 mb-3">🧠 AI 总结</h2>
+                <p id="llmSummary" class="text-slate-300 leading-relaxed"></p>
+            </div>
+
+            <!-- LLM 建议 -->
+            <div class="bg-slate-800 rounded-lg p-6">
+                <h2 class="text-xl font-bold text-cyan-400 mb-3">💡 优化建议</h2>
+                <ul id="llmSuggestions" class="space-y-2 text-slate-300"></ul>
+            </div>
+
+            <!-- 代码预览 -->
+            <div class="bg-slate-800 rounded-lg p-6">
+                 <h2 class="text-xl font-bold text-cyan-400 mb-3">📝 代码分析（行内标注）</h2>
+                 <div id="codeWithAnnotations" class="bg-slate-900 rounded p-3 overflow-x-auto font-mono text-sm"></div>
+            </div>
+
+        <!-- 错误提示 -->
+        <div id="errorSection" class="hidden bg-red-900 border border-red-700 rounded-lg p-4 mt-4">
+            <span id="errorText" class="text-red-200"></span>
+        </div>
+    </div>
+
+    <script>
+        const API_BASE = "http://127.0.0.1:8000";
+
+        async function submitCode() {
+            const code = document.getElementById("codeInput").value.trim();
+            const language = document.getElementById("language").value;
+
+            if (!code) {
+                showError("请先粘贴代码");
+                return;
+            }
+
+            // 隐藏旧结果
+            document.getElementById("resultSection").classList.add("hidden");
+            document.getElementById("errorSection").classList.add("hidden");
+            document.getElementById("progressSection").classList.remove("hidden");
+
+            try {
+                // 1. 提交任务
+                const res = await fetch(`${API_BASE}/review`, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ code, language })
+                });
+
+                if (!res.ok) throw new Error(`HTTP ${res.status}`);
+                const data = await res.json();
+                const taskId = data.task_id;
+                console.log("Task submitted:", taskId);
+
+                // 2. 轮询结果
+                pollResult(taskId, 0);
+
+            } catch (e) {
+                showError("提交失败: " + e.message);
+                document.getElementById("progressSection").classList.add("hidden");
+            }
+        }
+
+        async function pollResult(taskId, attempt) {
+            if (attempt > 60) {
+                showError("分析超时，请重试");
+                document.getElementById("progressSection").classList.add("hidden");
+                return;
+            }
+
+            try {
+                const res = await fetch(`${API_BASE}/task/${taskId}`);
+                const data = await res.json();
+
+                // 更新进度
+                if (data.status === "PROCESSING" || data.status === "PENDING") {
+                    const progress = data.progress || Math.min(attempt * 5, 90);
+                    document.getElementById("progressBar").style.width = progress + "%";
+                    document.getElementById("progressText").textContent = data.step || "正在分析...";
+                    setTimeout(() => pollResult(taskId, attempt + 1), 500);
+                    return;
+                }
+
+                // 分析完成
+                if (data.status === "SUCCESS") {
+                    document.getElementById("progressBar").style.width = "100%";
+                    setTimeout(() => {
+                        document.getElementById("progressSection").classList.add("hidden");
+                        showResult(data.result);
+                    }, 300);
+                    return;
+                }
+
+                // 失败
+                showError("分析失败: " + (data.error || "未知错误"));
+                document.getElementById("progressSection").classList.add("hidden");
+
+            } catch (e) {
+                showError("查询失败: " + e.message);
+                document.getElementById("progressSection").classList.add("hidden");
+            }
+        }
+
+        function showResult(result) {
+            document.getElementById("resultSection").classList.remove("hidden");
+            document.getElementById("complexity").textContent = result.complexity || "-";
+            document.getElementById("loopDepth").textContent = result.max_loop_depth ?? "-";
+            document.getElementById("loopCount").textContent = result.loop_count ?? "-";
+            document.getElementById("hasRecursion").textContent = result.has_recursion ? "是" : "否";
+            document.getElementById("llmSummary").textContent = result.llm_summary || "(无)";
+
+            // 建议列表
+            const ul = document.getElementById("llmSuggestions");
+            ul.innerHTML = "";
+            (result.llm_suggestions || []).forEach(s => {
+                const li = document.createElement("li");
+                li.className = "flex gap-2";
+                li.innerHTML = `<span class="text-cyan-400">•</span><span>${s}</span>`;
+                ul.appendChild(li);
+            });
+
+            // 代码预览
+            // 代码预览（带行内标注）
+            renderCodeWithAnnotations(result.code_preview || "", result.details || []);
+        }
+
+        function showError(msg) {
+            const el = document.getElementById("errorSection");
+            el.classList.remove("hidden");
+            document.getElementById("errorText").textContent = "❌ " + msg;
+        }
+    
+    function renderCodeWithAnnotations(code, details) {
+    const container = document.getElementById("codeWithAnnotations");
+    container.innerHTML = "";
+
+    // 建立行号 -> 标注列表 的映射
+    const lineAnnotations = {};
+    details.forEach(d => {
+        if (d.line) {
+            if (!lineAnnotations[d.line]) lineAnnotations[d.line] = [];
+            lineAnnotations[d.line].push(d);
+        }
+    });
+
+    // 按行渲染
+    const lines = code.split("\n");
+    lines.forEach((line, idx) => {
+        const lineNum = idx + 1;
+        const annotations = lineAnnotations[lineNum] || [];
+
+        const lineDiv = document.createElement("div");
+        lineDiv.className = "flex items-start py-0.5 hover:bg-slate-800/50";
+
+        // 行号
+        const lineNumSpan = document.createElement("span");
+        lineNumSpan.className = "text-slate-600 select-none mr-3 w-8 text-right";
+        lineNumSpan.textContent = lineNum;
+        lineDiv.appendChild(lineNumSpan);
+
+        // 代码内容
+        const codeSpan = document.createElement("span");
+        codeSpan.className = "flex-1 whitespace-pre text-cyan-100";
+        codeSpan.textContent = line || " ";
+
+        // 如果有标注，高亮背景
+        if (annotations.length > 0) {
+            const hasWarning = annotations.some(a => a.type === "loop" && a.depth >= 2);
+            codeSpan.className += hasWarning
+                ? " bg-red-900/30 border-l-2 border-red-500 pl-2"
+                : " bg-yellow-900/20 border-l-2 border-yellow-500 pl-2";
+        }
+
+        lineDiv.appendChild(codeSpan);
+
+        // 标注文字
+        if (annotations.length > 0) {
+            const annoSpan = document.createElement("span");
+            annoSpan.className = "ml-4 text-xs";
+            const annoText = annotations.map(a => {
+                if (a.type === "loop") return `⚠️ ${a.loop_type} 循环 (深度 ${a.depth})`;
+                if (a.type === "recursion") return `🔁 递归调用`;
+                return a.message || "";
+            }).join(" | ");
+            annoSpan.textContent = annoText;
+            annoSpan.className += annotations.some(a => a.depth >= 2)
+                ? " text-red-400"
+                : " text-yellow-400";
+            lineDiv.appendChild(annoSpan);
+        }
+
+        container.appendChild(lineDiv);
+    });
+}
+    async function showHistory() {
+    document.getElementById("historyModal").classList.remove("hidden");
+    const list = document.getElementById("historyList");
+    list.innerHTML = '<p class="text-slate-400">加载中...</p>';
+
+    try {
+        const res = await fetch(`${API_BASE}/history?limit=20`);
+        const data = await res.json();
+
+        if (!data.items || data.items.length === 0) {
+            list.innerHTML = '<p class="text-slate-400">暂无历史记录</p>';
+            return;
+        }
+
+        list.innerHTML = "";
+        data.items.forEach(item => {
+            const div = document.createElement("div");
+            div.className = "bg-slate-900 rounded p-3 hover:bg-slate-700 cursor-pointer transition";
+            div.onclick = () => loadHistoryItem(item.task_id);
+            div.innerHTML = `
+                <div class="flex justify-between items-center mb-1">
+                    <span class="text-cyan-400 font-bold">${item.complexity || "?"}</span>
+                    <span class="text-slate-500 text-xs">${item.created_at}</span>
+                </div>
+                <div class="text-xs text-slate-400 font-mono truncate">${item.code_preview}</div>
+            `;
+            list.appendChild(div);
+        });
+    } catch (e) {
+        list.innerHTML = `<p class="text-red-400">加载失败: ${e.message}</p>`;
+    }
+}
+
+function closeHistory() {
+    document.getElementById("historyModal").classList.add("hidden");
+}
+
+async function loadHistoryItem(taskId) {
+    try {
+        const res = await fetch(`${API_BASE}/history/${taskId}`);
+        const data = await res.json();
+        closeHistory();
+        
+        // 隐藏旧结果，展示历史结果
+        document.getElementById("progressSection").classList.add("hidden");
+        document.getElementById("errorSection").classList.add("hidden");
+        showResult(data.result);
+    } catch (e) {
+        showError("加载详情失败: " + e.message);
+    }
+}
+    </script>
+</body>
+</html>
